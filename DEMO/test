@@ -1,0 +1,233 @@
+import numpy
+import matplotlib.pyplot as plt
+from pandas import read_csv
+import math
+import pymysql
+import pandas
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import LSTM
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
+# %matplotlib inline
+
+# 连接数据库
+#连接配置信息
+config = {
+          'host':'127.0.0.1',
+          'port':3306,#MySQL默认端口
+          'user':'root',#mysql默认用户名
+          'password':'123456',
+          'db':'bigdata',#数据库
+          'charset':'utf8',
+          'cursorclass':pymysql.cursors.DictCursor,
+          }
+# conn=pymysql.connect(host='localhost',port='3306',user='root',password='123456',db='bigdata',charset='utf8')
+con=pymysql.connect(**config)
+# cur=conn.cursor(**config)
+# 执行SQL语句
+try:
+    with con.cursor() as curosr:
+        sql="select * from datatest"
+        curosr.execute(sql)
+        result=curosr.fetchall()
+finally:
+    con.close();
+
+# df=pandas.DataFrame(result)
+# df.head()
+# print(df)
+# 通过DataFrame来读取特定列的数据
+df=pandas.DataFrame(result,index=None,columns=['tomcat_request_count'])
+df.head()
+# 小数点后取舍保留至两位
+
+# 将数据类型变为float
+df=df.astype('float32')
+# print (df)
+# 读取特定一列的所有数据
+# test=df['tomcat_request_count']
+# test = test.astype('float32')
+# print(test)
+# 将结果存入数据集
+# result=cur.fetchall()
+
+
+# # 读取测试数据
+# dataframe = read_csv('international-airline-passengers.csv', usecols=[1], engine='python', skipfooter=3)
+# dataset = dataframe
+# # 将整型变为float
+# dataset = dataset.astype('float32')
+# print(dataset)
+
+#绘制画出的图像
+plt.plot(df)
+plt.show()
+
+
+# 将一列数据变为两列，第一列为t时间的响应时间，而第二列为t+1时间的响应时间
+#     look_back则是预测下一步需要的time steps
+#  time stps 则是LSTM算法中输入的数据与之前陆续输入的数据的联系
+
+def create_dataset(df,look_back=1):
+    dataX,dataY=[],[]
+    for i in range(len(df)-look_back-1):
+        a=df[i:(i+look_back),0]
+        dataX.append(a)
+        dataY.append(df[i+look_back,0])
+    return numpy.array(dataX),numpy.array(dataY)
+
+numpy.random.seed(7)
+
+# 设定训练数据的比例和测试数据的比例
+# 序列化数据
+scaler=MinMaxScaler(feature_range=(0,1))
+df=scaler.fit_transform(df)
+#  设定训练数据和测试数据
+train_size=int(len(df)*0.90)
+test_size=len(df)-train_size
+train,test=df[0:train_size,:],df[train_size:len(df),:]
+
+# 当x为t时，Y为t+1时的数据，并且此时的维度为[samples,features]
+
+look_back=1
+trainX,trainY=create_dataset(train,look_back)
+testX,testY=create_dataset(test,look_back)
+
+# 而LSTM模型中需要输入的数据的结构：[samples,time_steps.features]
+
+trainX=numpy.reshape(trainX,(trainX.shape[0],1,trainX.shape[1]))
+testX=numpy.reshape(testX,(testX.shape[0],1,testX.shape[1]))
+
+# 建立LSTM模型
+# 输入层有1个input,隐藏层4个神经元，输出层就是预测一个值，激活函数用sigmoid,迭代100次，batch_size为1
+
+model=Sequential()
+model.add(LSTM(4,input_shape=(1,look_back)))
+model.add(Dense(1))
+model.compile(loss='mean_squared_error',optimizer='adam')
+model.fit(trainX,trainY,epochs=100,batch_size=1,verbose=2)
+
+
+# 预测
+trainPredict=model.predict(trainX)
+testPredict=model.predict(testX)
+
+# 将预测数据转换为同一单位
+
+trainPredict=scaler.inverse_transform(trainPredict)
+trainY=scaler.inverse_transform([trainY])
+testPredict=scaler.inverse_transform(testPredict)
+testY=scaler.inverse_transform([testY])
+
+# 计算mean_squared_error
+trainScore=math.sqrt(mean_squared_error(trainY[0],trainPredict[:,0]))
+print('Train Score: %.2f RMSE' % (trainScore))
+testScore = math.sqrt(mean_squared_error(testY[0], testPredict[:,0]))
+print('Test Score: %.2f RMSE' % (testScore))
+
+
+# shift train predictions for plotting
+trainPredictPlot = numpy.empty_like(df)
+trainPredictPlot[:, :] = numpy.nan
+trainPredictPlot[look_back:len(trainPredict)+look_back, :] = trainPredict
+
+# shift test predictions for plotting
+testPredictPlot = numpy.empty_like(df)
+testPredictPlot[:, :] = numpy.nan
+testPredictPlot[len(trainPredict)+(look_back*2)+1:len(df)-1, :] = testPredict
+print(testPredict)
+# plot baseline and predictions
+plt.plot(scaler.inverse_transform(df))
+plt.plot(trainPredictPlot)
+plt.plot(testPredictPlot)
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# def create_dataset(dataset, look_back=1):
+#     dataX, dataY = [], []
+#     for i in range(len(dataset)-look_back-1):
+#         a = dataset[i:(i+look_back), 0]
+#         dataX.append(a)
+#         dataY.append(dataset[i + look_back, 0])
+#     return numpy.array(dataX), numpy.array(dataY)
+#
+# # fix random seed for reproducibility
+# numpy.random.seed(7)
+#
+# # normalize the dataset
+# scaler = MinMaxScaler(feature_range=(0, 1))
+# dataset = scaler.fit_transform(dataset)
+#
+#
+# # split into train and test sets
+# train_size = int(len(dataset) * 0.67)
+# test_size = len(dataset) - train_size
+# train, test = dataset[0:train_size,:], dataset[train_size:len(dataset),:]
+#
+# look_back = 1
+# trainX, trainY = create_dataset(train, look_back)
+# testX, testY = create_dataset(test, look_back)
+# trainX = numpy.reshape(trainX, (trainX.shape[0], 1, trainX.shape[1]))
+# testX = numpy.reshape(testX, (testX.shape[0], 1, testX.shape[1]))
+# model = Sequential()
+# model.add(LSTM(4, input_shape=(1, look_back)))
+# model.add(Dense(1))
+# model.compile(loss='mean_squared_error', optimizer='adam')
+# model.fit(trainX, trainY, epochs=100, batch_size=1, verbose=2)
+#
+# trainPredict = model.predict(trainX)
+# testPredict = model.predict(testX)
+# trainPredict = scaler.inverse_transform(trainPredict)
+# trainY = scaler.inverse_transform([trainY])
+# testPredict = scaler.inverse_transform(testPredict)
+# testY = scaler.inverse_transform([testY])
+# trainScore = math.sqrt(mean_squared_error(trainY[0], trainPredict[:,0]))
+# print('Train Score: %.2f RMSE' % (trainScore))
+# testScore = math.sqrt(mean_squared_error(testY[0], testPredict[:,0]))
+# print('Test Score: %.2f RMSE' % (testScore))
+#
+# # shift train predictions for plotting
+# trainPredictPlot = numpy.empty_like(dataset)
+# trainPredictPlot[:, :] = numpy.nan
+# trainPredictPlot[look_back:len(trainPredict)+look_back, :] = trainPredict
+#
+# # shift test predictions for plotting
+# testPredictPlot = numpy.empty_like(dataset)
+# testPredictPlot[:, :] = numpy.nan
+# testPredictPlot[len(trainPredict)+(look_back*2)+1:len(dataset)-1, :] = testPredict
+#
+# # plot baseline and predictions
+# plt.plot(scaler.inverse_transform(dataset))
+# plt.plot(trainPredictPlot)
+# plt.plot(testPredictPlot)
+# plt.show()
